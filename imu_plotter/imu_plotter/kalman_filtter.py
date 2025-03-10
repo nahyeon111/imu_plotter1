@@ -313,7 +313,7 @@ def main():
 if __name__ == '__main__':
     main()
 '''
-
+'''
 import rclpy
 from rclpy.node import Node
 from myimu.msg import Calculation
@@ -369,6 +369,183 @@ class IMUFusion(Node):
             math.degrees(roll_accel + roll_gyro), 
             math.degrees(pitch_accel + pitch_gyro), 
             math.degrees(yaw_mag + yaw_gyro)
+        ])
+        self.kf.predict()
+        self.kf.update(measured_state)
+        roll, pitch, yaw = self.kf.x
+
+        # Euler → Quaternion 변환
+        qx, qy, qz, qw = self.euler_to_quaternion(
+            math.radians(roll), 
+            math.radians(pitch), 
+            math.radians(yaw)
+        )
+
+        # 보정된 값 발행
+        orientation_msg = Calculation()
+        orientation_msg.final.roll = roll
+        orientation_msg.final.pitch = pitch
+        orientation_msg.final.yaw = yaw
+        orientation_msg.orientation.x = qx
+        orientation_msg.orientation.y = qy
+        orientation_msg.orientation.z = qz
+        orientation_msg.orientation.w = qw
+
+        self.orientation_pub.publish(orientation_msg)
+        self.get_logger().info(f"✅ 보정된 IMU 데이터: Roll={roll:.2f}°, Pitch={pitch:.2f}°, Yaw={yaw:.2f}°")
+
+    def euler_to_quaternion(self, roll, pitch, yaw):
+        """Roll, Pitch, Yaw 값을 Quaternion으로 변환"""
+        cy, sy = math.cos(yaw * 0.5), math.sin(yaw * 0.5)
+        cp, sp = math.cos(pitch * 0.5), math.sin(pitch * 0.5)
+        cr, sr = math.cos(roll * 0.5), math.sin(roll * 0.5)
+
+        qw = cr * cp * cy + sr * sp * sy
+        qx = sr * cp * cy - cr * sp * sy
+        qy = cr * sp * cy + sr * cp * sy
+        qz = cr * cp * sy - sr * sp * cy
+
+        return qx, qy, qz, qw
+
+def main():
+    rclpy.init()
+    node = IMUFusion()
+    rclpy.spin(node)
+    node.destroy_node()
+    rclpy.shutdown()
+
+if __name__ == '__main__':
+    main()
+'''
+'''
+import rclpy
+from rclpy.node import Node
+from myimu.msg import Calculation
+from geometry_msgs.msg import Quaternion
+import numpy as np
+import math
+from filterpy.kalman import KalmanFilter  # pip install filterpy
+
+class IMUFusion(Node):
+    def __init__(self):
+        super().__init__('imu_fusion')
+
+        # IMU 데이터 구독 (가속도, 자이로, 자기장 센서)
+        self.accel_sub = self.create_subscription(Calculation, '/calculation/accel', self.imu_callback, 10)
+        self.gyro_sub = self.create_subscription(Calculation, '/calculation/gyro', self.imu_callback, 10)
+        self.mag_sub = self.create_subscription(Calculation, '/calculation/mag', self.imu_callback, 10)
+
+        # 보정된 Roll, Pitch, Yaw 발행
+        self.orientation_pub = self.create_publisher(Calculation, '/calculation/final', 10)
+
+        # Kalman Filter 설정 (상태 벡터: roll, pitch, yaw)
+        self.kf = KalmanFilter(dim_x=3, dim_z=3)
+        self.kf.x = np.zeros(3)  # 초기 상태 (roll, pitch, yaw)
+        self.kf.F = np.eye(3)  # 상태 전이 행렬
+        self.kf.H = np.eye(3)  # 측정 행렬
+        self.kf.P *= 1.0  # 초기 오차 공분산 행렬
+        self.kf.R *= 0.5  # 측정 노이즈 공분산 행렬
+        self.kf.Q *= 0.01  # 프로세스 노이즈 공분산 행렬
+
+        self.get_logger().info("✅ IMU Fusion Node Started!")
+
+    def imu_callback(self, msg):
+
+        # 칼만 필터에 의한 보정
+        measured_state = np.array([
+            math.degrees(msg.accel.roll + msg.gyro.roll),
+            math.degrees(msg.accel.pitch  + msg.gyro.pitch),
+            math.degrees(msg.magnetic.yaw + msg.gyro.yaw)
+        ])
+        self.kf.predict()
+        self.kf.update(measured_state)
+        roll, pitch, yaw = self.kf.x
+
+        # Euler → Quaternion 변환
+        qx, qy, qz, qw = self.euler_to_quaternion(
+            math.radians(roll),
+            math.radians(pitch),
+            math.radians(yaw)
+        )
+
+        # 보정된 값 발행
+        orientation_msg = Calculation()
+        orientation_msg.final.roll = roll
+        orientation_msg.final.pitch = pitch
+        orientation_msg.final.yaw = yaw
+        orientation_msg.orientation.x = qx
+        orientation_msg.orientation.y = qy
+        orientation_msg.orientation.z = qz
+        orientation_msg.orientation.w = qw
+
+        self.orientation_pub.publish(orientation_msg)
+        self.get_logger().info(f"✅ 보정된 IMU 데이터: Roll={roll:.2f}°, Pitch={pitch:.2f}°, Yaw={yaw:.2f}°")
+
+    def euler_to_quaternion(self, roll, pitch, yaw):
+        """Roll, Pitch, Yaw 값을 Quaternion으로 변환"""
+        cy, sy = math.cos(yaw * 0.5), math.sin(yaw * 0.5)
+        cp, sp = math.cos(pitch * 0.5), math.sin(pitch * 0.5)
+        cr, sr = math.cos(roll * 0.5), math.sin(roll * 0.5)
+
+        qw = cr * cp * cy + sr * sp * sy
+        qx = sr * cp * cy - cr * sp * sy
+        qy = cr * sp * cy + sr * cp * sy
+        qz = cr * cp * sy - sr * sp * cy
+
+        return qx, qy, qz, qw
+
+def main():
+    rclpy.init()
+    node = IMUFusion()
+    rclpy.spin(node)
+    node.destroy_node()
+    rclpy.shutdown()
+
+if __name__ == '__main__':
+    main()
+'''   
+
+import rclpy
+from rclpy.node import Node
+from myimu.msg import Calculation
+from geometry_msgs.msg import Quaternion
+import numpy as np
+import math
+from filterpy.kalman import KalmanFilter  # pip install filterpy
+
+class IMUFusion(Node):
+    def __init__(self):
+        super().__init__('imu_fusion')
+
+        # IMU 데이터 구독 (가속도, 자이로, 자기장 센서)
+        self.accel_sub = self.create_subscription(Calculation, '/calculation/accel', self.imu_callback, 10)
+        self.gyro_sub = self.create_subscription(Calculation, '/calculation/gyro', self.imu_callback, 10)
+        self.mag_sub = self.create_subscription(Calculation, '/calculation/mag', self.imu_callback, 10)
+
+        # 보정된 Roll, Pitch, Yaw 발행
+        self.orientation_pub = self.create_publisher(Calculation, '/calculation/final', 10)
+
+        # Kalman Filter 설정 (상태 벡터: roll, pitch, yaw)
+        self.kf = KalmanFilter(dim_x=3, dim_z=3)
+        self.kf.x = np.zeros(3)  # 초기 상태 (roll, pitch, yaw)
+        self.kf.F = np.eye(3)  # 상태 전이 행렬
+        
+        self.kf.H = np.eye(3)  # 측정 행렬
+        self.kf.P *= 1.0  # 초기 오차 공분산 행렬
+
+        self.kf.R = np.diag([1, 1, 2.0])  # Roll, Pitch 노이즈 증가 → 자이로 덜 신뢰
+        self.kf.Q = np.diag([0.001, 0.001, 0.1])  # Roll, Pitch 변화량 줄이기
+
+
+        self.get_logger().info("✅ IMU Fusion Node Started!")
+
+    def imu_callback(self, msg):
+        """가속도, 자이로, 자기장 데이터를 처리하여 Roll, Pitch, Yaw 계산 후 보정"""
+        # 칼만 필터에 의한 보정
+        measured_state = np.array([
+            math.degrees(msg.accel.roll + msg.gyro.roll*0.1), 
+            math.degrees(msg.accel.pitch + msg.gyro.pitch*0.1), 
+            math.degrees(msg.magnetic.yaw + msg.gyro.yaw*0.1)
         ])
         self.kf.predict()
         self.kf.update(measured_state)

@@ -1,7 +1,4 @@
-'''
-# orientation 데이터 받아오지 않고 VER.
-# roll, pitch, yaw 데이터 필요
-# 가속도, 자이로, 지자기계에서 뽑은 상태값에서 칼만필터 적용 후 보정된 roll, pitch, yaw 사용할 것
+# 가속도, 자이로, 지자기계에서 뽑은 상태값에서 칼만필터 적용 후 보정된 roll, pitch, yaw 사용
 # 계산 처리 과정 간소화, 오차 줄이기 위함
 import rclpy
 from rclpy.node import Node
@@ -103,6 +100,7 @@ class IMUPositionEstimator(Node):
         # ✅ 위치 발행
         self.publish_vector(self.position_pub, self.position)
 
+        '''
         # ✅ 디버깅 로그 출력
         self.get_logger().info(f"""
 📌 Original Acceleration: x={accel[0]:.3f}, y={accel[1]:.3f}, z={accel[2]:.3f}
@@ -117,6 +115,7 @@ class IMUPositionEstimator(Node):
 📍 Position: x={self.position[0]:.3f}, y={self.position[1]:.3f}, z={self.position[2]:.3f}
 🕒 Time Step: {dt:.3f}s
         """)
+        '''
 
     def publish_vector(self, publisher, vector):
         """Vector3 메시지로 변환하여 발행"""
@@ -134,4 +133,4 @@ def main():
 
 if __name__ == '__main__':
     main()
-'''
+
