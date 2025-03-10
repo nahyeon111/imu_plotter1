@@ -1,8 +1,9 @@
+'''
 # 가속도, 자이로, 지자기계에서 뽑은 상태값에서 칼만필터 적용 후 보정된 roll, pitch, yaw 사용
 # 계산 처리 과정 간소화, 오차 줄이기 위함
 import rclpy
 from rclpy.node import Node
-from myimu.msg import ImuSensor, PosVel
+from myimu.msg import ImuSensor, Calculation, PosVel
 import numpy as np
 
 # 중력제거 클래스
@@ -100,7 +101,7 @@ class IMUPositionEstimator(Node):
         # ✅ 위치 발행
         self.publish_vector(self.position_pub, self.position)
 
-        '''
+        '
         # ✅ 디버깅 로그 출력
         self.get_logger().info(f"""
 📌 Original Acceleration: x={accel[0]:.3f}, y={accel[1]:.3f}, z={accel[2]:.3f}
@@ -115,7 +116,7 @@ class IMUPositionEstimator(Node):
 📍 Position: x={self.position[0]:.3f}, y={self.position[1]:.3f}, z={self.position[2]:.3f}
 🕒 Time Step: {dt:.3f}s
         """)
-        '''
+        '
 
     def publish_vector(self, publisher, vector):
         """Vector3 메시지로 변환하여 발행"""
@@ -133,4 +134,203 @@ def main():
 
 if __name__ == '__main__':
     main()
+'''
+'''
+import rclpy
+from rclpy.node import Node
+import numpy as np
+from geometry_msgs.msg import Vector3, Quaternion
+from myimu.msg import ImuSensor, PosVel  # 사용자 정의 메시지 가져오기
+from tf_transformations import quaternion_multiply, quaternion_inverse # sudo apt install ros-${ROS_DISTRO}-tf-transformations
 
+class IMUVelocityPosition(Node):
+    def __init__(self):
+        super().__init__('imu_velocity_position')
+
+        # 속도 및 위치 초기화
+        self.velocity = np.array([0.0, 0.0, 0.0])  # 속도 (m/s)
+        self.position = np.array([0.0, 0.0, 0.0])  # 위치 (m)
+
+        # 마지막 시간 초기화
+        self.last_time = None
+
+        # IMU 센서 및 EKF 보정된 쿼터니언 구독
+        self.imu_sub = self.create_subscription(ImuSensor, '/imu/sensor', self.imu_callback, 10)
+        self.create_subscription(Quaternion, '/calculation/final', self.quaternion_callback, 10)
+
+        # 속도 및 위치 퍼블리셔
+        self.posvel_pub_position = self.create_publisher(PosVel, 'PosVel/position', 10)
+        self.posvel_pub_velocity = self.create_publisher(PosVel, 'PosVel/velocity', 10)
+        self.posvel_pub_non_gravity = self.create_publisher(PosVel, 'PosVel/non_gravity', 10)
+
+
+        # 보정된 쿼터니언 초기화
+        self.corrected_quaternion = np.array([1.0, 0.0, 0.0, 0.0])  # 기본 단위 쿼터니언
+
+    def quaternion_callback(self, msg):
+        """ EKF 보정된 쿼터니언 업데이트 """
+        self.corrected_quaternion = np.array([msg.w, msg.x, msg.y, msg.z])
+
+    def imu_callback(self, msg):
+        """ IMU 데이터를 받아서 속도 및 위치 계산 """
+        if self.last_time is None:
+            self.last_time = self.get_clock().now()
+            return
+
+        # 현재 시간
+        current_time = self.get_clock().now()
+        dt = (current_time - self.last_time).nanoseconds * 1e-9  # 초 단위 변환
+        self.last_time = current_time
+
+        if dt <= 0:
+            return
+
+        # 가속도 데이터 추출
+        accel_imu = np.array([msg.linear_acceleration.x, msg.linear_acceleration.y, msg.linear_acceleration.z])
+
+        # 중력 보정 (쿼터니언을 이용해 가속도 변환)
+        accel_world = self.transform_acceleration(accel_imu, self.corrected_quaternion)
+
+        # 중력 제거
+        gravity = np.array([0.0, 0.0, 9.81])
+        accel_corrected = accel_world - gravity
+
+        # 속도 계산 (적분)
+        self.velocity += accel_corrected * dt
+
+        # 위치 계산 (적분)
+        self.position += self.velocity * dt
+
+        # 메시지 생성 및 퍼블리시
+        posvel_msg = PosVel()
+        posvel_msg.header.stamp = current_time.to_msg()
+        posvel_msg.header.frame_id = "imu_link"
+
+        # 중력 제거된 가속도를 쿼터니언으로 저장
+        posvel_msg.non_gravity.x, posvel_msg.non_gravity.y, posvel_msg.non_gravity.z, posvel_msg.non_gravity.w = (accel_corrected.tolist() + [1.0])
+
+        # 속도 저장
+        posvel_msg.velocity.x, posvel_msg.velocity.y, posvel_msg.velocity.z = self.velocity
+
+        # 위치 저장
+        posvel_msg.position.x, posvel_msg.position.y, posvel_msg.position.z = self.position
+
+        # 퍼블리시
+        self.posvel_pub.publish(posvel_msg)
+
+    def transform_acceleration(self, accel, quaternion):
+        """IMU 좌표계에서 월드 좌표계로 가속도 변환"""
+        q_conj = quaternion_inverse(quaternion)  # 쿼터니언 역수 계산
+        accel_quat = np.array([0.0, accel[0], accel[1], accel[2]])
+        transformed_accel = quaternion_multiply(quaternion_multiply(quaternion, accel_quat), q_conj)
+        return transformed_accel[1:]  # x, y, z 값 반환
+
+def main(args=None):
+    rclpy.init(args=args)
+    node = IMUVelocityPosition()
+    rclpy.spin(node)
+    node.destroy_node()
+    rclpy.shutdown()
+
+if __name__ == '__main__':
+    main()
+'''
+import rclpy
+from rclpy.node import Node
+import numpy as np
+from geometry_msgs.msg import Vector3, Quaternion
+from myimu.msg import ImuSensor, PosVel  # 사용자 정의 메시지 가져오기
+from tf_transformations import quaternion_multiply, quaternion_inverse # sudo apt install ros-${ROS_DISTRO}-tf-transformations
+
+class IMUVelocityPosition(Node):
+    def __init__(self):
+        super().__init__('imu_velocity_position')
+
+        # 속도 및 위치 초기화
+        self.velocity = np.array([0.0, 0.0, 0.0])  # 속도 (m/s)
+        self.position = np.array([0.0, 0.0, 0.0])  # 위치 (m)
+
+        # 마지막 시간 초기화
+        self.last_time = None
+
+        # IMU 센서 및 EKF 보정된 쿼터니언 구독
+        self.imu_sub = self.create_subscription(ImuSensor, '/imu/sensor', self.imu_callback, 10)
+        self.create_subscription(Quaternion, '/calculation/final', self.quaternion_callback, 10)
+
+        # 각기 다른 퍼블리셔 할당
+        self.posvel_pub_position = self.create_publisher(PosVel, 'PosVel/position', 10)
+        self.posvel_pub_velocity = self.create_publisher(PosVel, 'PosVel/velocity', 10)
+        self.posvel_pub_non_gravity = self.create_publisher(PosVel, 'PosVel/non_gravity', 10)
+
+        # 보정된 쿼터니언 초기화
+        self.corrected_quaternion = np.array([1.0, 0.0, 0.0, 0.0])  # 기본 단위 쿼터니언
+
+    def quaternion_callback(self, msg):
+        """ EKF 보정된 쿼터니언 업데이트 """
+        self.corrected_quaternion = np.array([msg.w, msg.x, msg.y, msg.z])
+
+    def imu_callback(self, msg):
+        """ IMU 데이터를 받아서 속도 및 위치 계산 """
+        if self.last_time is None:
+            self.last_time = self.get_clock().now()
+            return
+
+        # 현재 시간
+        current_time = self.get_clock().now()
+        dt = (current_time - self.last_time).nanoseconds * 1e-9  # 초 단위 변환
+        self.last_time = current_time
+
+        if dt <= 0:
+            return
+
+        # 가속도 데이터 추출
+        accel_imu = np.array([msg.linear_acceleration.x, msg.linear_acceleration.y, msg.linear_acceleration.z])
+
+        # 중력 보정 (쿼터니언을 이용해 가속도 변환)
+        accel_world = self.transform_acceleration(accel_imu, self.corrected_quaternion)
+
+        # 중력 제거
+        gravity = np.array([0.0, 0.0, 9.81])
+        accel_corrected = accel_world - gravity
+
+        # 속도 계산 (적분)
+        self.velocity += accel_corrected * dt
+
+        # 위치 계산 (적분)
+        self.position += self.velocity * dt
+
+        # 메시지 생성
+        posvel_msg = PosVel()
+        posvel_msg.header.stamp = current_time.to_msg()
+        posvel_msg.header.frame_id = "imu_link"
+
+        # 중력 제거된 가속도를 쿼터니언으로 저장
+        posvel_msg.non_gravity.x, posvel_msg.non_gravity.y, posvel_msg.non_gravity.z, posvel_msg.non_gravity.w = (accel_corrected.tolist() + [1.0])
+
+        # 속도 저장
+        posvel_msg.velocity.x, posvel_msg.velocity.y, posvel_msg.velocity.z = self.velocity
+
+        # 위치 저장
+        posvel_msg.position.x, posvel_msg.position.y, posvel_msg.position.z = self.position
+
+        # 퍼블리시
+        self.posvel_pub_position.publish(posvel_msg)  # 위치 퍼블리시
+        self.posvel_pub_velocity.publish(posvel_msg)  # 속도 퍼블리시
+        self.posvel_pub_non_gravity.publish(posvel_msg)  # 중력 제거된 가속도 퍼블리시
+
+    def transform_acceleration(self, accel, quaternion):
+        """IMU 좌표계에서 월드 좌표계로 가속도 변환"""
+        q_conj = quaternion_inverse(quaternion)  # 쿼터니언 역수 계산
+        accel_quat = np.array([0.0, accel[0], accel[1], accel[2]])
+        transformed_accel = quaternion_multiply(quaternion_multiply(quaternion, accel_quat), q_conj)
+        return transformed_accel[1:]  # x, y, z 값 반환
+    
+def main(args=None):
+    rclpy.init(args=args)
+    node = IMUVelocityPosition()
+    rclpy.spin(node)
+    node.destroy_node()
+    rclpy.shutdown()
+
+if __name__ == '__main__':
+    main()
