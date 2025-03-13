@@ -1,511 +1,5 @@
 '''
-import rclpy
-from rclpy.node import Node
-from geometry_msgs.msg import TransformStamped
-import tf2_ros
-from myimu.msg import Calculation
-
-class IMUVisualizer(Node):
-    def __init__(self):
-        super().__init__('imu_visualizer')
-
-        self.tf_broadcaster = tf2_ros.TransformBroadcaster(self)
-        self.subscriber = self.create_subscription(Calculation, '/calculation/final', self.callback, 10)
-
-        self.get_logger().info("✅ IMU Visualizer Node Started!")
-
-    def callback(self, msg):
-        t = TransformStamped()
-        t.header.stamp = self.get_clock().now().to_msg()
-        t.header.frame_id = "world"
-        t.child_frame_id = "imu_link"
-
-        t.transform.rotation.x = msg.quaternion.x
-        t.transform.rotation.y = msg.quaternion.y
-        t.transform.rotation.z = msg.quaternion.z
-        t.transform.rotation.w = msg.quaternion.w
-
-        self.tf_broadcaster.sendTransform(t)
-
-def main():
-    rclpy.init()
-    node = IMUVisualizer()
-    rclpy.spin(node)
-    node.destroy_node()
-    rclpy.shutdown()
-
-if __name__ == '__main__':
-    main()
-'''
-'''
-import rclpy
-from rclpy.node import Node
-from myimu.msg import Calculation
-from sensor_msgs.msg import Imu
-from geometry_msgs.msg import Pose, TransformStamped
-import tf2_ros
-
-class IMUVisualizerAndPosePublisher(Node):
-    def __init__(self):
-        super().__init__('imu_visualizer_and_pose_publisher')
-
-        # TF 브로드캐스터 설정
-        self.tf_broadcaster = tf2_ros.TransformBroadcaster(self)
-
-        # /calculation/final 구독
-        self.subscription = self.create_subscription(
-            Calculation,
-            '/calculation/final',
-            self.callback,
-            10
-        )
-        
-        # Pose 메시지 퍼블리셔 생성
-        self.pose_publisher = self.create_publisher(Pose, '/calculation/final_pose', 10)
-        
-        # sensor_msgs/msg/Imu 퍼블리셔 생성
-        self.imu_publisher = self.create_publisher(Imu, '/imu/data', 10)
-
-        self.get_logger().info("✅ IMU Visualizer and Pose Publisher Node Started!")
-
-    def callback(self, msg):
-        # ✅ Pose 메시지 생성 및 값 할당
-        pose_msg = Pose()
-        pose_msg.position.x = msg.x
-        pose_msg.position.y = msg.y
-        pose_msg.position.z = msg.z
-        pose_msg.orientation = msg.orientation
-
-        # Pose 메시지 퍼블리시
-        self.pose_publisher.publish(pose_msg)
-        self.get_logger().info('Pose 메시지를 퍼블리시했습니다.')
-
-        # ✅ TransformStamped 메시지 생성 및 값 할당 (TF2)
-        t = TransformStamped()
-        t.header.stamp = self.get_clock().now().to_msg()
-        t.header.frame_id = "world"
-        t.child_frame_id = "imu_link"
-
-        t.transform.translation.x = msg.x
-        t.transform.translation.y = msg.y
-        t.transform.translation.z = msg.z
-        t.transform.rotation = msg.orientation
-
-        # 변환 브로드캐스트
-        self.tf_broadcaster.sendTransform(t)
-        self.get_logger().info('TF 변환을 브로드캐스트했습니다.')
-
-        # ✅ sensor_msgs/msg/Imu 변환 및 퍼블리시
-        imu_msg = Imu()
-        imu_msg.header.stamp = self.get_clock().now().to_msg()
-        imu_msg.header.frame_id = "imu_link"
-        
-        # Quaternion 설정
-        imu_msg.orientation = msg.orientation
-        
-        # 각속도 (Angular Velocity) 설정
-        imu_msg.angular_velocity.x = msg.angular_velocity.x
-        imu_msg.angular_velocity.y = msg.angular_velocity.y
-        imu_msg.angular_velocity.z = msg.angular_velocity.z
-
-        # 가속도 (Linear Acceleration) 설정
-        imu_msg.linear_acceleration.x = msg.linear_acceleration.x
-        imu_msg.linear_acceleration.y = msg.linear_acceleration.y
-        imu_msg.linear_acceleration.z = msg.linear_acceleration.z
-
-        # Imu 메시지 퍼블리시
-        self.imu_publisher.publish(imu_msg)
-        self.get_logger().info('IMU 메시지를 퍼블리시했습니다.')
-
-def main():
-    rclpy.init()
-    node = IMUVisualizerAndPosePublisher()
-    rclpy.spin(node)
-    node.destroy_node()
-    rclpy.shutdown()
-
-if __name__ == '__main__':
-    main()
-'''
-'''
-# RViz2에서 /visualization/pose 토픽을 구독하고, Pose 메시지(orientation)를 시각화
-
-import rclpy
-from rclpy.node import Node
-from geometry_msgs.msg import PoseStamped
-from myimu.msg import Calculation
-
-class RvizVisualizer(Node):
-    def __init__(self):
-        super().__init__('rviz_visualizer')
-        
-        # Roll, Pitch, Yaw 값을 구독하는 구독자
-        self.orientation_sub = self.create_subscription(
-            Calculation,
-            '/calculation/final',
-            self.orientation_callback,
-            10
-        )
-        
-        # Pose 메시지 발행을 위한 퍼블리셔
-        self.pose_pub = self.create_publisher(PoseStamped, '/visualization/pose', 10)
-        
-        self.get_logger().info("RViz Visualization Node Started!")
-
-    def orientation_callback(self, msg):
-        # 이미 쿼터니언으로 발행된 Roll, Pitch, Yaw를 직접 구독
-        qx = msg.final_quaternion.x
-        qy = msg.final_quaternion.y
-        qz = msg.final_quaternion.z
-        qw = msg.final_quaternion.w
-        
-        # Pose 메시지 생성
-        pose_msg = PoseStamped()
-        pose_msg.header.stamp = self.get_clock().now().to_msg()
-        pose_msg.header.frame_id = "map"  # RViz에서 고정 프레임으로 설정된 'map'을 기준으로 설정
-        
-        # 쿼터니언을 Pose로 변환하여 설정
-        pose_msg.pose.orientation.x = qx
-        pose_msg.pose.orientation.y = qy
-        pose_msg.pose.orientation.z = qz
-        pose_msg.pose.orientation.w = qw
-        
-        # Pose 메시지 발행
-        self.pose_pub.publish(pose_msg)
-
-def main():
-    rclpy.init()
-    node = RvizVisualizer()
-    rclpy.spin(node)
-    node.destroy_node()
-    rclpy.shutdown()
-
-if __name__ == '__main__':
-    main()
-'''
-
-
-'''
-# RViz2에서 /visualization/pose 토픽을 구독하고, Pose 메시지(orientation)를 시각화
-
-import rclpy
-from rclpy.node import Node
-from geometry_msgs.msg import PoseStamped
-from myimu.msg import Calculation
-
-class RvizVisualizer(Node):
-    def __init__(self):
-        super().__init__('rviz_visualizer')
-        
-        # Roll, Pitch, Yaw 값을 구독하는 구독자
-        self.orientation_sub = self.create_subscription(
-            Calculation,
-            '/calculation/final',
-            self.orientation_callback,
-            10
-        )
-        
-        # Pose 메시지 발행을 위한 퍼블리셔
-        self.pose_pub = self.create_publisher(PoseStamped, '/visualization/pose', 10)
-        
-        self.get_logger().info("RViz Visualization Node Started!")
-
-    def orientation_callback(self, msg):
-        # 쿼터니언으로 발행된 Roll, Pitch, Yaw를 구독
-        qx = msg.orientation.x
-        qy = msg.orientation.y
-        qz = msg.orientation.z
-        qw = msg.orientation.w
-        
-        # Pose 메시지 생성
-        pose_msg = PoseStamped()
-        pose_msg.header.stamp = self.get_clock().now().to_msg()
-        pose_msg.header.frame_id = "map"  # RViz에서 고정 프레임으로 설정된 'map'을 기준으로 설정
-        
-        # 쿼터니언을 Pose로 변환하여 설정
-        pose_msg.pose.orientation.x = qx
-        pose_msg.pose.orientation.y = qy
-        pose_msg.pose.orientation.z = qz
-        pose_msg.pose.orientation.w = qw
-        
-        # Pose 메시지 발행
-        self.pose_pub.publish(pose_msg)
-
-def main():
-    rclpy.init()
-    node = RvizVisualizer()
-    rclpy.spin(node)
-    node.destroy_node()
-    rclpy.shutdown()
-
-if __name__ == '__main__':
-    main()
-'''
-'''
-import rclpy
-from rclpy.node import Node
-from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSHistoryPolicy
-from geometry_msgs.msg import PoseStamped, Point, Quaternion
-from visualization_msgs.msg import Marker
-from myimu.msg import Calculation
-
-class RvizVisualizer(Node):
-    def __init__(self):
-        super().__init__('rviz_visualizer')
-
-        # RViz2에서 사용할 QoS 설정 (RELIABLE으로 변경)
-        qos_profile = QoSProfile(
-            reliability=QoSReliabilityPolicy.RELIABLE,  # 안정적인 데이터 전송을 위해 RELIABLE 사용
-            history=QoSHistoryPolicy.KEEP_LAST,
-            depth=10
-        )
-
-        # Roll, Pitch, Yaw 값을 구독하는 구독자
-        self.orientation_sub = self.create_subscription(
-            Calculation,
-            '/calculation/final',
-            self.orientation_callback,
-            qos_profile
-        )
-
-        # Pose 메시지 퍼블리셔
-        self.pose_pub = self.create_publisher(PoseStamped, '/visualization/pose', qos_profile)
-
-        # Marker 메시지 퍼블리셔
-        self.marker_pub = self.create_publisher(Marker, '/visualization/marker', qos_profile)
-
-        self.get_logger().info("RViz Visualization Node Started!")
-
-    def orientation_callback(self, msg):
-        # 쿼터니언 값 수신
-        qx = msg.orientation.x
-        qy = msg.orientation.y
-        qz = msg.orientation.z
-        qw = msg.orientation.w
-
-        # PoseStamped 메시지 생성 및 발행
-        pose_msg = PoseStamped()
-        pose_msg.header.stamp = self.get_clock().now().to_msg()
-        pose_msg.header.frame_id = "map"
-        pose_msg.pose.orientation = Quaternion(x=qx, y=qy, z=qz, w=qw)
-        self.pose_pub.publish(pose_msg)
-
-        # Marker 메시지 생성 및 발행
-        marker_msg = Marker()
-        marker_msg.header.stamp = self.get_clock().now().to_msg()
-        marker_msg.header.frame_id = "map"
-        marker_msg.ns = "sensor_axes"
-        marker_msg.id = 0
-        marker_msg.type = Marker.ARROW
-        marker_msg.action = Marker.ADD
-        marker_msg.pose.orientation = Quaternion(x=qx, y=qy, z=qz, w=qw)
-
-        # 위치 조정 (1m 앞, 0.5m 위)
-        marker_msg.pose.position.x = 1.0
-        marker_msg.pose.position.y = 0.0
-        marker_msg.pose.position.z = 0.5
-
-        # 화살표 크기 조정
-        marker_msg.scale.x = 0.5
-        marker_msg.scale.y = 0.1
-        marker_msg.scale.z = 0.1
-
-        # 색상 설정 (빨간색)
-        marker_msg.color.r = 1.0
-        marker_msg.color.g = 0.0
-        marker_msg.color.b = 0.0
-        marker_msg.color.a = 1.0  # 투명도 확인
-
-        self.marker_pub.publish(marker_msg)
-
-def main():
-    rclpy.init()
-    node = RvizVisualizer()
-    rclpy.spin(node)
-    node.destroy_node()
-    rclpy.shutdown()
-
-if __name__ == '__main__':
-    main()
-'''
-'''
-import rclpy
-from rclpy.node import Node
-from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSHistoryPolicy
-from geometry_msgs.msg import PoseStamped, Quaternion
-from visualization_msgs.msg import Marker
-from myimu.msg import Calculation
-
-class RvizVisualizer(Node):
-    def __init__(self):
-        super().__init__('rviz_visualizer')
-
-        # RViz2에서 사용할 QoS 설정
-        qos_profile = QoSProfile(
-            reliability=QoSReliabilityPolicy.RELIABLE,
-            history=QoSHistoryPolicy.KEEP_LAST,
-            depth=10
-        )
-
-        # Roll, Pitch, Yaw 값을 구독하는 구독자
-        self.orientation_sub = self.create_subscription(
-            Calculation,
-            '/calculation/final',
-            self.orientation_callback,
-            qos_profile
-        )
-
-        # Pose 메시지 퍼블리셔
-        self.pose_pub = self.create_publisher(PoseStamped, '/visualization/pose', qos_profile)
-
-        # Marker 메시지 퍼블리셔
-        self.marker_pub = self.create_publisher(Marker, '/visualization/marker', qos_profile)
-
-        self.get_logger().info("RViz Visualization Node Started!")
-
-    def orientation_callback(self, msg):
-        # 수신된 쿼터니언 값
-        qx = msg.orientation.x
-        qy = msg.orientation.y
-        qz = msg.orientation.z
-        qw = msg.orientation.w
-
-        # PoseStamped 메시지 생성 및 발행
-        pose_msg = PoseStamped()
-        pose_msg.header.stamp = self.get_clock().now().to_msg()
-        pose_msg.header.frame_id = "map"
-        pose_msg.pose.orientation = Quaternion(x=qx, y=qy, z=qz, w=qw)
-        self.pose_pub.publish(pose_msg)
-
-        # X, Y, Z 축에 대한 Marker 생성 및 발행
-        self.publish_marker(qx, qy, qz, qw, "x_axis", 1.0, 0.0, 0.0)  # X축 (빨강)
-        self.publish_marker(qx, qy, qz, qw, "y_axis", 0.0, 1.0, 0.0)  # Y축 (초록)
-        self.publish_marker(qx, qy, qz, qw, "z_axis", 0.0, 0.0, 1.0)  # Z축 (파랑)
-
-    def publish_marker(self, qx, qy, qz, qw, ns, r, g, b):
-        """
-        특정 축 (X, Y, Z)을 나타내는 Marker를 생성하고 발행하는 함수
-        """
-        marker_msg = Marker()
-        marker_msg.header.stamp = self.get_clock().now().to_msg()
-        marker_msg.header.frame_id = "map"
-        marker_msg.ns = ns
-        marker_msg.id = 0
-        marker_msg.type = Marker.ARROW
-        marker_msg.action = Marker.ADD
-        marker_msg.pose.orientation = Quaternion(x=qx, y=qy, z=qz, w=qw)
-
-        # 축 위치 조정 (각 축이 원점에서 시작하도록 설정)
-        marker_msg.pose.position.x = 0.0
-        marker_msg.pose.position.y = 0.0
-        marker_msg.pose.position.z = 0.0
-
-        # 축 크기 설정
-        marker_msg.scale.x = 0.5  # 길이
-        marker_msg.scale.y = 0.05  # 화살표 두께
-        marker_msg.scale.z = 0.05  # 화살표 두께
-
-        # 색상 설정 (각 축별 다른 색상)
-        marker_msg.color.r = r
-        marker_msg.color.g = g
-        marker_msg.color.b = b
-        marker_msg.color.a = 1.0  # 투명도
-
-        self.marker_pub.publish(marker_msg)
-
-def main():
-    rclpy.init()
-    node = RvizVisualizer()
-    rclpy.spin(node)
-    node.destroy_node()
-    rclpy.shutdown()
-
-if __name__ == '__main__':
-    main()
-'''
-'''
-import rclpy
-from rclpy.node import Node
-from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSHistoryPolicy
-from geometry_msgs.msg import PoseStamped, Quaternion, Point
-from visualization_msgs.msg import Marker
-from myimu.msg import Calculation
-import numpy as np
-
-class RvizVisualizer(Node):
-    def __init__(self):
-        super().__init__('rviz_visualizer')
-
-        # QoS 설정
-        qos_profile = QoSProfile(
-            reliability=QoSReliabilityPolicy.RELIABLE,
-            history=QoSHistoryPolicy.KEEP_LAST,
-            depth=10
-        )
-
-        # Roll, Pitch, Yaw 값을 구독하는 구독자
-        self.orientation_sub = self.create_subscription(
-            Calculation,
-            '/calculation/final',
-            self.orientation_callback,
-            qos_profile
-        )
-
-        # Marker 메시지 퍼블리셔
-        self.marker_pub = self.create_publisher(Marker, '/visualization/marker', qos_profile)
-
-        self.get_logger().info("RViz Visualization Node Started!")
-
-    def orientation_callback(self, msg):
-        """IMU 데이터를 받아 RViz2에 XYZ 축을 시각화"""
-        # 수신된 쿼터니언 값
-        qx, qy, qz, qw = msg.orientation.x, msg.orientation.y, msg.orientation.z, msg.orientation.w
-
-        # X, Y, Z 축을 원점 기준으로 회전하여 표시
-        self.publish_marker(qx, qy, qz, qw, "x_axis", 1.0, 0.0, 0.0, [0.2, 0.0, 0.0])  # X축 (빨강)
-        self.publish_marker(qx, qy, qz, qw, "y_axis", 0.0, 1.0, 0.0, [0.0, 0.2, 0.0])  # Y축 (초록)
-        self.publish_marker(qx, qy, qz, qw, "z_axis", 0.0, 0.0, 1.0, [0.0, 0.0, 0.2])  # Z축 (파랑)
-
-    def publish_marker(self, qx, qy, qz, qw, ns, r, g, b, offset):
-        """
-        특정 축 (X, Y, Z)을 나타내는 Marker를 생성하고 발행하는 함수
-        """
-        marker_msg = Marker()
-        marker_msg.header.stamp = self.get_clock().now().to_msg()
-        marker_msg.header.frame_id = "map"
-        marker_msg.ns = ns
-        marker_msg.id = 0
-        marker_msg.type = Marker.ARROW
-        marker_msg.action = Marker.ADD
-        marker_msg.pose.orientation = Quaternion(x=qx, y=qy, z=qz, w=qw)
-
-        # 축의 시작점과 끝점 설정 (원점에서 회전한 좌표)
-        marker_msg.points = [Point(x=0.0, y=0.0, z=0.0), Point(x=offset[0], y=offset[1], z=offset[2])]
-
-        # 축 크기 설정
-        marker_msg.scale.x = 0.02  # 화살표 샤프트 두께
-        marker_msg.scale.y = 0.05  # 화살표 헤드 크기
-        marker_msg.scale.z = 0.05  # 화살표 헤드 크기
-
-        # 색상 설정 (각 축별 다른 색상)
-        marker_msg.color.r = r
-        marker_msg.color.g = g
-        marker_msg.color.b = b
-        marker_msg.color.a = 1.0  # 투명도
-
-        self.marker_pub.publish(marker_msg)
-
-def main():
-    rclpy.init()
-    node = RvizVisualizer()
-    rclpy.spin(node)
-    node.destroy_node()
-    rclpy.shutdown()
-
-if __name__ == '__main__':
-    main()
-'''
-
+# ver. first
 # IMU 데이터를 TF 프레임으로 변환
 # rviz2에서 Fixed Frame을 "map"으로 설정, TF 트리에서 /imu_link로 확인 가능
 # rviz2->add->by display type->rvix2_default_plugins->tf,axes
@@ -514,7 +8,7 @@ import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSHistoryPolicy
 from geometry_msgs.msg import TransformStamped
-from myimu.msg import Calculation
+from myimu.msg import Calculation, PosVel
 import tf2_ros
 import transforms3d.quaternions as quat
 
@@ -529,6 +23,15 @@ class RvizVisualizer(Node):
             depth=10
         )
 
+        # 위치 데이터를 구독하는 구독자
+        self.posvel_sub = self.create_subscription(
+            PosVel,
+            'PosVel/position',  # 위치 메시지 구독
+            self.posvel_callback,
+            qos_profile
+        )
+
+
         # Roll, Pitch, Yaw 값을 구독하는 구독자
         self.orientation_sub = self.create_subscription(
             Calculation,
@@ -540,26 +43,500 @@ class RvizVisualizer(Node):
         # TF broadcaster 생성
         self.tf_broadcaster = tf2_ros.TransformBroadcaster(self)
 
+        # 초기화 
+        self.position = [0.0, 0.0, 0.0] # IMU의 위치: (x, y, z)
+        self.orientation = [0.0, 0.0, 0.0, 1.0]  # 초기 자세 (단위: quaternion)
+
         self.get_logger().info("RViz Visualization Node (TF 기반) Started!")
 
+    def posvel_callback(self, msg):
+        """위치 데이터를 업데이트하고 TF 발행"""
+        self.position = [msg.position.x, msg.position.y, msg.position.z]
+        self.publish_tf()
+    
     def orientation_callback(self, msg):
-        """IMU 데이터를 받아 RViz2의 TF로 변환"""
-        qx, qy, qz, qw = msg.orientation.x, msg.orientation.y, msg.orientation.z, msg.orientation.w
+        """IMU 데이터를 받아 자세 업데이트 및 TF 발행"""
+        self.orientation = [msg.orientation.x, msg.orientation.y, msg.orientation.z, msg.orientation.w]
+        self.publish_tf()
 
-        # TF 메시지 생성
+    def publish_tf(self):
+        """현재 위치 및 자세 정보를 기반으로 TF 발행"""
         t = TransformStamped()
         t.header.stamp = self.get_clock().now().to_msg()
         t.header.frame_id = "map"   # 기준 좌표계
         t.child_frame_id = "imu_link"  # IMU 센서 좌표계
-        t.transform.translation.x = 0.0
-        t.transform.translation.y = 0.0
-        t.transform.translation.z = 0.0
-        t.transform.rotation.x = qx
-        t.transform.rotation.y = qy
-        t.transform.rotation.z = qz
-        t.transform.rotation.w = qw
+
+        # 위치 정보 적용
+        t.transform.translation.x = self.position[0]
+        t.transform.translation.y = self.position[1]
+        t.transform.translation.z = self.position[2]
+
+        # 자세 정보 적용
+        t.transform.rotation.x = self.orientation[0]
+        t.transform.rotation.y = self.orientation[1]
+        t.transform.rotation.z = self.orientation[2]
+        t.transform.rotation.w = self.orientation[3]
 
         # TF 정보 발행
+        self.tf_broadcaster.sendTransform(t)
+        
+        #self.get_logger().info(f"Published TF: Position({self.position[0]}, {self.position[1]}, {self.position[2]}) Orientation({self.orientation[0]}, {self.orientation[1]}, {self.orientation[2]}, {self.orientation[3]})")
+        
+def main():
+    rclpy.init()
+    node = RvizVisualizer()
+    rclpy.spin(node)
+    node.destroy_node()
+    rclpy.shutdown()
+
+if __name__ == '__main__':
+    main()
+'''
+'''
+# final_1.ver
+# IMU 데이터를 TF 프레임으로 변환 + 오도메트리(조향 상태 반영)
+# rviz2에서 Fixed Frame을 "map"으로 설정, TF 트리에서 /imu_link로 확인 가능
+# rviz2->add->by display type->rvix2_default_plugins->tf,axes
+# rviz2->add->by topic->odometry
+
+import rclpy
+from rclpy.node import Node
+from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSHistoryPolicy
+from geometry_msgs.msg import TransformStamped, Vector3
+from myimu.msg import Calculation, PosVel
+from nav_msgs.msg import Odometry
+import tf2_ros
+import transforms3d.quaternions as quat
+
+class RvizVisualizer(Node):
+    def __init__(self):
+        super().__init__('rviz_visualizer')
+
+        # QoS 설정
+        qos_profile = QoSProfile(
+            reliability=QoSReliabilityPolicy.RELIABLE,
+            history=QoSHistoryPolicy.KEEP_LAST,
+            depth=10
+        )
+
+        # 위치 데이터를 구독하는 구독자
+        self.pos_sub = self.create_subscription(
+            PosVel,
+            'PosVel/position',  # 위치 메시지 구독
+            self.posvel_callback,
+            qos_profile
+        )
+
+        # 속도 데이터를 구독하는 구독자
+        self.vel_sub = self.create_subscription(
+            PosVel,
+            'PosVel/velocity',  # 속도 메시지 구독
+            self.posvel_callback,
+            qos_profile
+        )
+
+
+        # Roll, Pitch, Yaw 값을 구독하는 구독자
+        self.orientation_sub = self.create_subscription(
+            Calculation,
+            '/calculation/final',
+            self.orientation_callback,
+            qos_profile
+        )
+
+        # TF broadcaster 생성
+        self.tf_broadcaster = tf2_ros.TransformBroadcaster(self)
+
+        # Odometry publisher 생성
+        self.odom_pub = self.create_publisher(Odometry, '/odom', qos_profile)
+
+        # 초기화 
+        self.position = [0.0, 0.0, 0.0] # IMU의 위치: (x, y, z)
+        self.orientation = [0.0, 0.0, 0.0, 1.0]  # 초기 자세 (단위: quaternion)
+        self.velocity = [0.0, 0.0, 0.0]  # 속도 (m/s)
+
+        self.get_logger().info("RViz Visualization Node (TF 기반) Started!")
+
+    def posvel_callback(self, msg):
+        """위치 데이터를 업데이트하고 TF 발행"""
+        self.position = [msg.position.x, msg.position.y, msg.position.z]
+        self.velocity = [msg.velocity.x, msg.velocity.y, msg.velocity.z]
+        self.publish_tf()
+        self.publish_odometry()
+    
+    def orientation_callback(self, msg):
+        """IMU 데이터를 받아 자세 업데이트 및 TF 발행"""
+        self.orientation = [msg.orientation.x, msg.orientation.y, msg.orientation.z, msg.orientation.w]
+        self.publish_tf()
+        self.publish_odometry()
+
+    def publish_tf(self):
+        """현재 위치 및 자세 정보를 기반으로 TF 발행"""
+        t = TransformStamped()
+        t.header.stamp = self.get_clock().now().to_msg()
+        t.header.frame_id = "map"   # 기준 좌표계
+        t.child_frame_id = "imu_link"  # IMU 센서 좌표계
+
+        # 위치 정보 적용
+        t.transform.translation.x = self.position[0]
+        t.transform.translation.y = self.position[1]
+        t.transform.translation.z = self.position[2]
+
+        # 자세 정보 적용
+        t.transform.rotation.x = self.orientation[0]
+        t.transform.rotation.y = self.orientation[1]
+        t.transform.rotation.z = self.orientation[2]
+        t.transform.rotation.w = self.orientation[3]
+
+        # TF 정보 발행
+        self.tf_broadcaster.sendTransform(t)
+        
+        #self.get_logger().info(f"Published TF: Position({self.position[0]}, {self.position[1]}, {self.position[2]}) Orientation({self.orientation[0]}, {self.orientation[1]}, {self.orientation[2]}, {self.orientation[3]})")
+        
+
+    def publish_odometry(self):
+        """Odometry 메시지 발행"""
+        odom = Odometry()
+        odom.header.stamp = self.get_clock().now().to_msg()
+        odom.header.frame_id = "map"
+        odom.child_frame_id = "imu_link"
+
+        # 위치 정보 적용
+        odom.pose.pose.position.x = self.position[0]
+        odom.pose.pose.position.y = self.position[1]
+        odom.pose.pose.position.z = self.position[2]
+
+        # 자세 정보 적용
+        odom.pose.pose.orientation.x = self.orientation[0]
+        odom.pose.pose.orientation.y = self.orientation[1]
+        odom.pose.pose.orientation.z = self.orientation[2]
+        odom.pose.pose.orientation.w = self.orientation[3]
+
+        # 속도 정보 적용
+        odom.twist.twist.linear.x = self.velocity[0]
+        odom.twist.twist.linear.y = self.velocity[1]
+        odom.twist.twist.linear.z = self.velocity[2]
+
+        # 공분산 값 설정
+        # 위치 공분산 (6x6 행렬)
+        odom.pose.covariance = [
+            0.01, 0.0, 0.0, 0.0, 0.0, 0.0,  # x 방향
+            0.0, 0.01, 0.0, 0.0, 0.0, 0.0,  # y 방향
+            0.0, 0.0, 0.01, 0.0, 0.0, 0.0,  # z 방향
+            0.0, 0.0, 0.0, 0.1, 0.0, 0.0,  # x 방향 회전
+            0.0, 0.0, 0.0, 0.0, 0.1, 0.0,  # y 방향 회전
+            0.0, 0.0, 0.0, 0.0, 0.0, 0.1   # z 방향 회전
+        ]
+
+        # 속도 공분산 (6x6 행렬)
+        odom.twist.covariance = [
+            0.25, 0.0, 0.0, 0.0, 0.0, 0.0,  # linear.x
+            0.0, 0.25, 0.0, 0.0, 0.0, 0.0,  # linear.y
+            0.0, 0.0, 0.25, 0.0, 0.0, 0.0,  # linear.z
+            0.0, 0.0, 0.0, 0.01, 0.0, 0.0,  # angular.x
+            0.0, 0.0, 0.0, 0.0, 0.01, 0.0,  # angular.y
+            0.0, 0.0, 0.0, 0.0, 0.0, 0.01   # angular.z
+        ]
+
+        # Odometry 정보 발행
+        self.odom_pub.publish(odom)
+
+def main():
+    rclpy.init()
+    node = RvizVisualizer()
+    rclpy.spin(node)
+    node.destroy_node()
+    rclpy.shutdown()
+
+if __name__ == '__main__':
+    main()
+'''
+'''
+# final_2.ver
+# IMU 데이터를 TF 프레임으로 변환 + 오도메트리(조향 상태 반영) + 동적으로 경로가 변경되는 경우: 곡선, 직선 경로 번환 코드 추가 
+# rviz2에서 Fixed Frame을 "map"으로 설정, TF 트리에서 /imu_link로 확인 가능
+# rviz2->add->by display type->rvix2_default_plugins->tf,axes
+# rviz2->add->by topic->odometry
+
+import rclpy
+import math
+from rclpy.node import Node
+from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSHistoryPolicy
+from geometry_msgs.msg import TransformStamped, Vector3
+from myimu.msg import Calculation, PosVel
+from nav_msgs.msg import Odometry
+import tf2_ros
+import transforms3d.quaternions as quat
+
+# 경로 구분: 0은 곡선, 1은 직선
+class PathPlanner:
+    def __init__(self):
+        self.path_type = 0  # 곡선에서 시작
+        self.radius = 1.0  # 곡선 경로의 반지름
+        self.speed = 0.1  # 속도
+        self.x_start = 0.0
+        self.y_start = 0.0
+        self.angle = 0.0  # 초기 각도
+
+    def get_position(self, t):
+        if self.path_type == 0:  # 곡선 경로 (원형)
+            x = self.x_start + self.radius * math.cos(self.angle + self.speed * t)
+            y = self.y_start + self.radius * math.sin(self.angle + self.speed * t)
+            return x, y
+        elif self.path_type == 1:  # 직선 경로
+            x = self.x_start + self.speed * t
+            y = self.y_start
+            return x, y
+    
+    def switch_to_straight(self):
+        self.path_type = 1  # 직선 경로로 전환
+
+    def switch_to_curve(self):
+        self.path_type = 0  # 곡선 경로로 전환
+
+class RvizVisualizer(Node):
+    def __init__(self):
+        super().__init__('rviz_visualizer')
+
+        # QoS 설정
+        qos_profile = QoSProfile(
+            reliability=QoSReliabilityPolicy.RELIABLE,
+            history=QoSHistoryPolicy.KEEP_LAST,
+            depth=10
+        )
+
+        # 위치 데이터를 구독하는 구독자
+        self.pos_sub = self.create_subscription(
+            PosVel,
+            'PosVel/position',  # 위치 메시지 구독
+            self.posvel_callback,
+            qos_profile
+        )
+
+        # 속도 데이터를 구독하는 구독자
+        self.vel_sub = self.create_subscription(
+            PosVel,
+            'PosVel/velocity',  # 속도 메시지 구독
+            self.posvel_callback,
+            qos_profile
+        )
+
+        # Roll, Pitch, Yaw 값을 구독하는 구독자
+        self.orientation_sub = self.create_subscription(
+            Calculation,
+            '/calculation/final',
+            self.orientation_callback,
+            qos_profile
+        )
+
+        # TF broadcaster 생성
+        self.tf_broadcaster = tf2_ros.TransformBroadcaster(self)
+
+        # Odometry publisher 생성
+        self.odom_pub = self.create_publisher(Odometry, '/odom', qos_profile)
+
+        # PathPlanner 객체 생성
+        self.path_planner = PathPlanner()
+        
+        # 초기화 
+        self.position = [0.0, 0.0, 0.0] # IMU의 위치: (x, y, z)
+        self.orientation = [0.0, 0.0, 0.0, 1.0]  # 초기 자세 (단위: quaternion)
+        self.velocity = [0.0, 0.0, 0.0]  # 속도 (m/s)
+
+        self.get_logger().info("RViz Visualization Node (TF 기반) Started!")
+
+    def posvel_callback(self, msg):
+        """위치 데이터를 업데이트하고 TF 발행"""
+        self.position = [msg.position.x, msg.position.y, msg.position.z]
+        self.velocity = [msg.velocity.x, msg.velocity.y, msg.velocity.z]
+        self.publish_tf()
+        self.publish_odometry()
+    
+    def orientation_callback(self, msg):
+        """IMU 데이터를 받아 자세 업데이트 및 TF 발행"""
+        self.orientation = [msg.orientation.x, msg.orientation.y, msg.orientation.z, msg.orientation.w]
+        self.publish_tf()
+        self.publish_odometry()
+
+    def publish_tf(self):
+        """현재 위치 및 자세 정보를 기반으로 TF 발행"""
+        t = TransformStamped()
+        t.header.stamp = self.get_clock().now().to_msg()
+        t.header.frame_id = "map"   # 기준 좌표계
+        t.child_frame_id = "imu_link"  # IMU 센서 좌표계
+
+        # 위치 정보 적용
+        t.transform.translation.x = self.position[0]
+        t.transform.translation.y = self.position[1]
+        t.transform.translation.z = self.position[2]
+
+        # 자세 정보 적용
+        t.transform.rotation.x = self.orientation[0]
+        t.transform.rotation.y = self.orientation[1]
+        t.transform.rotation.z = self.orientation[2]
+        t.transform.rotation.w = self.orientation[3]
+
+        # TF 정보 발행
+        self.tf_broadcaster.sendTransform(t)
+        
+        #self.get_logger().info(f"Published TF: Position({self.position[0]}, {self.position[1]}, {self.position[2]}) Orientation({self.orientation[0]}, {self.orientation[1]}, {self.orientation[2]}, {self.orientation[3]})")
+        
+
+    def publish_odometry(self):
+        """Odometry 메시지 발행"""
+        odom = Odometry()
+        odom.header.stamp = self.get_clock().now().to_msg()
+        odom.header.frame_id = "map"
+        odom.child_frame_id = "imu_link"
+
+        # 시간 기반으로 위치 계산 (PathPlanner 사용)
+        t = self.get_clock().now().seconds_nanoseconds()[0]  # 시간 (초)
+        x, y = self.path_planner.get_position(t)
+        self.position = [x, y, 0.0]  # Z축은 0으로 설정
+
+        # 위치 정보 적용
+        odom.pose.pose.position.x = self.position[0]
+        odom.pose.pose.position.y = self.position[1]
+        odom.pose.pose.position.z = self.position[2]
+
+        # 자세 정보 적용
+        odom.pose.pose.orientation.x = self.orientation[0]
+        odom.pose.pose.orientation.y = self.orientation[1]
+        odom.pose.pose.orientation.z = self.orientation[2]
+        odom.pose.pose.orientation.w = self.orientation[3]
+
+        # 속도 정보 적용
+        odom.twist.twist.linear.x = self.velocity[0]
+        odom.twist.twist.linear.y = self.velocity[1]
+        odom.twist.twist.linear.z = self.velocity[2]
+
+        # 공분산 값 설정
+        # 위치 공분산 (6x6 행렬)
+        odom.pose.covariance = [
+            0.01, 0.0, 0.0, 0.0, 0.0, 0.0,  # x 방향
+            0.0, 0.01, 0.0, 0.0, 0.0, 0.0,  # y 방향
+            0.0, 0.0, 0.01, 0.0, 0.0, 0.0,  # z 방향
+            0.0, 0.0, 0.0, 0.1, 0.0, 0.0,  # x 방향 회전
+            0.0, 0.0, 0.0, 0.0, 0.1, 0.0,  # y 방향 회전
+            0.0, 0.0, 0.0, 0.0, 0.0, 0.1   # z 방향 회전
+        ]
+
+        # 속도 공분산 (6x6 행렬)
+        odom.twist.covariance = [
+            0.25, 0.0, 0.0, 0.0, 0.0, 0.0,  # linear.x
+            0.0, 0.25, 0.0, 0.0, 0.0, 0.0,  # linear.y
+            0.0, 0.0, 0.25, 0.0, 0.0, 0.0,  # linear.z
+            0.0, 0.0, 0.0, 0.01, 0.0, 0.0,  # angular.x
+            0.0, 0.0, 0.0, 0.0, 0.01, 0.0,  # angular.y
+            0.0, 0.0, 0.0, 0.0, 0.0, 0.01   # angular.z
+        ]
+
+        # Odometry 정보 발행
+        self.odom_pub.publish(odom)
+
+def main():
+    rclpy.init()
+    node = RvizVisualizer()
+    rclpy.spin(node)
+    node.destroy_node()
+    rclpy.shutdown()
+
+if __name__ == '__main__':
+    main()
+'''
+'''
+import rclpy
+from rclpy.node import Node
+from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSHistoryPolicy
+from geometry_msgs.msg import TransformStamped
+from myimu.msg import Calculation, PosVel
+import tf2_ros
+import transforms3d.quaternions as quat
+
+class RvizVisualizer(Node):
+    def __init__(self):
+        super().__init__('rviz_visualizer')
+
+        # QoS 설정
+        qos_profile = QoSProfile(
+            reliability=QoSReliabilityPolicy.RELIABLE,
+            history=QoSHistoryPolicy.KEEP_LAST,
+            depth=10
+        )
+
+        # 위치 데이터를 구독하는 구독자
+        self.posvel_sub = self.create_subscription(
+            PosVel,
+            'PosVel/position',
+            self.posvel_callback,
+            qos_profile
+        )
+
+        # Roll, Pitch, Yaw 값을 구독하는 구독자
+        self.orientation_sub = self.create_subscription(
+            Calculation,
+            '/calculation/final',
+            self.orientation_callback,
+            qos_profile
+        )
+
+        # TF broadcaster 생성
+        self.tf_broadcaster = tf2_ros.TransformBroadcaster(self)
+
+        # Quaternion 메시지 발행자
+        self.quaternion_pub = self.create_publisher(Quaternion, '/visualization/quaternion', qos_profile)
+
+        # Calculation 메시지 발행자
+        self.calculation_pub = self.create_publisher(Calculation, '/calculation/final', qos_profile)
+
+        # 초기화 
+        self.position = [0.0, 0.0, 0.0]
+        self.orientation = [0.0, 0.0, 0.0, 1.0]
+
+        self.get_logger().info("RViz Visualization Node (TF 기반) Started!")
+
+    def posvel_callback(self, msg):
+        """위치 데이터를 업데이트하고 TF 발행"""
+        self.position = [msg.position.x, msg.position.y, msg.position.z]
+        self.publish_tf()
+    
+    def orientation_callback(self, msg):
+        """IMU 데이터를 받아 자세 업데이트 및 TF 발행"""
+        self.orientation = [msg.orientation.x, msg.orientation.y, msg.orientation.z, msg.orientation.w]
+        self.publish_tf()
+
+        # 발행된 메시지를 /calculation/final로 전송
+        calculation_msg = Calculation()
+        calculation_msg.orientation.x = self.orientation[0]
+        calculation_msg.orientation.y = self.orientation[1]
+        calculation_msg.orientation.z = self.orientation[2]
+        calculation_msg.orientation.w = self.orientation[3]
+        self.calculation_pub.publish(calculation_msg)
+
+        # Quaternion 메시지를 /visualization/quaternion로 발행
+        quaternion_msg = Quaternion()
+        quaternion_msg.x = self.orientation[0]
+        quaternion_msg.y = self.orientation[1]
+        quaternion_msg.z = self.orientation[2]
+        quaternion_msg.w = self.orientation[3]
+        self.quaternion_pub.publish(quaternion_msg)
+
+    def publish_tf(self):
+        """현재 위치 및 자세 정보를 기반으로 TF 발행"""
+        t = TransformStamped()
+        t.header.stamp = self.get_clock().now().to_msg()
+        t.header.frame_id = "map"
+        t.child_frame_id = "imu_link"
+
+        t.transform.translation.x = self.position[0]
+        t.transform.translation.y = self.position[1]
+        t.transform.translation.z = self.position[2]
+
+        t.transform.rotation.x = self.orientation[0]
+        t.transform.rotation.y = self.orientation[1]
+        t.transform.rotation.z = self.orientation[2]
+        t.transform.rotation.w = self.orientation[3]
+
         self.tf_broadcaster.sendTransform(t)
 
 def main():
@@ -571,3 +548,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+'''

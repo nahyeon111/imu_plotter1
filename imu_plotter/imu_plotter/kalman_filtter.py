@@ -533,7 +533,10 @@ class IMUFusion(Node):
         self.kf.H = np.eye(3)  # 측정 행렬
         self.kf.P *= 1.0  # 초기 오차 공분산 행렬
 
-        self.kf.R = np.diag([1, 1, 2.0])  # Roll, Pitch 노이즈 증가 → 자이로 덜 신뢰
+        # Q, R 두 개의 공분신 행렬은 칼만필터의 설계인자
+        # 시행 착오를 통해 보정하면서 적절한 값을 선정할 것
+        # 측정 값의 영향 낮추고 싶다면 R의 크기를 키우거나, Q의 크기를 감소시킨다 => 칼만이득 감소 
+        self.kf.R = np.diag([1, 1, 2.0])  # Roll, Pitch 노이즈 증가 → 자이로 덜 신뢰 # 센서 제작사에서 보통 제공한다고 함 
         self.kf.Q = np.diag([0.001, 0.001, 0.1])  # Roll, Pitch 변화량 줄이기
 
 
@@ -593,3 +596,109 @@ def main():
 
 if __name__ == '__main__':
     main()
+
+'''
+# sudo apt install ros-humble-robot-localization
+# ros2 에서 제공하는 패키지
+# 센서 데이터를 융합하여 로봇의 위치(Position)와 자세(Orientation)를 추정함 (EKF와 UKF를 사용)
+# ekf_localization_node, ukf_localization_node 제공
+# ROS의 nav_msgs/Odometry 및 sensor_msgs/Imu 형식의 메시지 지원..
+import rclpy
+from rclpy.node import Node
+from myimu.msg import Calculation
+from geometry_msgs.msg import Quaternion
+import numpy as np
+import math
+from robot_localization.ekf import Ekf
+from robot_localization.measurement import Measurement
+from rclpy.time import Time
+
+class IMUEKF(Node):
+    def __init__(self):
+        super().__init__('imu_ekf')
+
+        # IMU 데이터 구독 (가속도, 자이로, 자기장 센서)
+        self.accel_sub = self.create_subscription(Calculation, '/calculation/accel', self.imu_callback, 10)
+        self.gyro_sub = self.create_subscription(Calculation, '/calculation/gyro', self.imu_callback, 10)
+        self.mag_sub = self.create_subscription(Calculation, '/calculation/mag', self.imu_callback, 10)
+
+        # 보정된 Roll, Pitch, Yaw 발행
+        self.orientation_pub = self.create_publisher(Calculation, '/calculation/final', 10)
+
+        # EKF 초기화
+        self.ekf = Ekf()
+        self.ekf.initialize(rclpy.time.Time().nanoseconds)
+
+        self.get_logger().info("✅ IMU EKF Node Started!")
+
+    def imu_callback(self, msg):
+        """IMU 데이터를 EKF에 적용하여 보정"""
+        # IMU 측정값 생성 (Roll, Pitch, Yaw)
+        measured_state = np.array([
+            math.degrees(msg.accel.roll + msg.gyro.roll * 0.1),
+            math.degrees(msg.accel.pitch + msg.gyro.pitch * 0.1),
+            math.degrees(msg.magnetic.yaw + msg.gyro.yaw * 0.1)
+        ])
+
+        # 측정 공분산 행렬 설정 (센서 노이즈 고려)
+        measurement_covariance = np.diag([1.0, 1.0, 2.0])
+
+        # Measurement 객체 생성
+        measurement = Measurement(
+            topic_name="/calculation/imu",
+            measurement=measured_state,
+            covariance=measurement_covariance,
+            mahalanobis_thresh_=None,
+            update_vector=[True, True, True]
+        )
+
+        # EKF 필터 적용
+        self.ekf.predict(Time.from_msg(msg.header.stamp), rclpy.duration.Duration(seconds=0.1))
+        self.ekf.correct(measurement)
+
+        # EKF 결과 가져오기
+        roll, pitch, yaw = self.ekf.getState()[:3]
+
+        # Euler → Quaternion 변환
+        qx, qy, qz, qw = self.euler_to_quaternion(
+            math.radians(roll),
+            math.radians(pitch),
+            math.radians(yaw)
+        )
+
+        # 보정된 값 발행
+        orientation_msg = Calculation()
+        orientation_msg.final.roll = roll
+        orientation_msg.final.pitch = pitch
+        orientation_msg.final.yaw = yaw
+        orientation_msg.orientation.x = qx
+        orientation_msg.orientation.y = qy
+        orientation_msg.orientation.z = qz
+        orientation_msg.orientation.w = qw
+
+        self.orientation_pub.publish(orientation_msg)
+        self.get_logger().info(f"✅ EKF 적용: Roll={roll:.2f}°, Pitch={pitch:.2f}°, Yaw={yaw:.2f}°")
+
+    def euler_to_quaternion(self, roll, pitch, yaw):
+        """Roll, Pitch, Yaw 값을 Quaternion으로 변환"""
+        cy, sy = math.cos(yaw * 0.5), math.sin(yaw * 0.5)
+        cp, sp = math.cos(pitch * 0.5), math.sin(pitch * 0.5)
+        cr, sr = math.cos(roll * 0.5), math.sin(roll * 0.5)
+
+        qw = cr * cp * cy + sr * sp * sy
+        qx = sr * cp * cy - cr * sp * sy
+        qy = cr * sp * cy + sr * cp * sy
+        qz = cr * cp * sy - sr * sp * cy
+
+        return qx, qy, qz, qw
+
+def main():
+    rclpy.init()
+    node = IMUEKF()
+    rclpy.spin(node)
+    node.destroy_node()
+    rclpy.shutdown()
+
+if __name__ == '__main__':
+    main()
+'''
